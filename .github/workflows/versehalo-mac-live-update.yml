@@ -1,0 +1,39 @@
+name: VerseHalo Mac live automatic discovery
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published Mac beta to discover
+        required: true
+        default: 6.1.11-beta.3
+        type: string
+      previous_version:
+        description: Older updater-enabled fixture version
+        required: true
+        default: 6.1.11-beta.2
+        type: string
+permissions:
+  contents: write
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 12
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      PREVIOUS_VERSION: ${{ inputs.previous_version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install verification tools
+        run: npm install --prefix "$RUNNER_TEMP/live-deps" --ignore-scripts --no-audit --no-fund @playwright/test@1.64.1 @electron/asar@3.4.1
+      - name: Observe normal native automatic discovery of the public signed release
+        run: NODE_PATH="$RUNNER_TEMP/live-deps/node_modules" node verification/verify-mac-automatic.cjs
+      - name: Retain compact native proof
+        run: gh release upload "mac-v$RELEASE_VERSION" --repo Benighter/VerseHalo-Releases "$RUNNER_TEMP"/automatic-discovery-*.json --clobber
