@@ -1,18 +1,74 @@
 name: VerseHalo Mac free build
 on:
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact private source commit
+        required: true
+        type: string
+      input_sha256:
+        description: Encrypted input SHA-256
+        required: true
+        type: string
 permissions:
-  contents: read
+  contents: write
+concurrency:
+  group: versehalo-mac-free-build
+  cancel-in-progress: true
 jobs:
-  runner-check:
+  build:
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-15, macos-15-intel]
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 3
+    timeout-minutes: 35
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      BUILD_ARCH: ${{ matrix.arch }}
     steps:
-      - name: Check the free standard Mac runner
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Authenticate and unpack encrypted build input
+        working-directory: ${{ runner.temp }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_SHA: ${{ inputs.input_sha256 }}
+          SOURCE_KEY: ${{ secrets.VERSEHALO_MAC_BUILD_KEY }}
         run: |
-          sw_vers
-          uname -m
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          gh release download "mac-ci-$SOURCE_SHA" --repo Benighter/VerseHalo-Releases --pattern source.vhe --dir "$RUNNER_TEMP"
+          node <<'NODE'
+          const fs=require('fs'),c=require('crypto'),p=require('path'),b=fs.readFileSync(p.join(process.env.RUNNER_TEMP,'source.vhe'));
+          if(c.createHash('sha256').update(b).digest('hex')!==process.env.INPUT_SHA||b.subarray(0,8).toString()!=='VHMAC001')throw Error('Input verification failed.');
+          const d=c.createDecipheriv('aes-256-gcm',Buffer.from(process.env.SOURCE_KEY.trim(),'base64'),b.subarray(8,20));d.setAAD(Buffer.from('VerseHaloMacBuild/'+process.env.SOURCE_SHA));d.setAuthTag(b.subarray(20,36));
+          fs.writeFileSync(p.join(process.env.RUNNER_TEMP,'source.tar'),Buffer.concat([d.update(b.subarray(36)),d.final()]),{mode:0o600});
+          NODE
+          mkdir -p "$RUNNER_TEMP/source"
+          tar -xf "$RUNNER_TEMP/source.tar" -C "$RUNNER_TEMP/source"
+      - name: Build and verify the native application
+        working-directory: ${{ runner.temp }}/source/Mac
+        run: node scripts/ci-build.cjs
+      - name: Encrypt diagnostics and retain verified build outputs
+        if: always()
+        working-directory: ${{ runner.temp }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_KEY: ${{ secrets.VERSEHALO_MAC_BUILD_KEY }}
+        run: |
+          if [[ ! -f "$RUNNER_TEMP/source/Mac/private-ci.log" ]]; then exit 0; fi
+          node <<'NODE'
+          const fs=require('fs'),p=require('path'),c=require('crypto'),{execFileSync}=require('child_process'),root=p.join(process.env.RUNNER_TEMP,'source','Mac'),file=p.join(process.env.RUNNER_TEMP,'qa-'+process.env.BUILD_ARCH+'.tar.gz');
+          execFileSync('/usr/bin/tar',['-czf',file,'-C',root,'test-results','private-ci.log']);
+          const iv=c.randomBytes(12),cipher=c.createCipheriv('aes-256-gcm',Buffer.from(process.env.SOURCE_KEY.trim(),'base64'),iv);cipher.setAAD(Buffer.from('VerseHaloMacQA/'+process.env.SOURCE_SHA+'/'+process.env.BUILD_ARCH));const data=Buffer.concat([cipher.update(fs.readFileSync(file)),cipher.final()]);
+          fs.writeFileSync(p.join(process.env.RUNNER_TEMP,'qa-'+process.env.BUILD_ARCH+'.vhe'),Buffer.concat([Buffer.from('VHQAB001'),iv,cipher.getAuthTag(),data]));
+          NODE
+          gh release upload "mac-ci-$SOURCE_SHA" --repo Benighter/VerseHalo-Releases "$RUNNER_TEMP/qa-$BUILD_ARCH.vhe" --clobber
+          shopt -s nullglob
+          files=("$RUNNER_TEMP/source/Mac/dist/"*.dmg "$RUNNER_TEMP/source/Mac/dist/"*.zip "$RUNNER_TEMP/source/Mac/test-results/build-verification-$BUILD_ARCH.json")
+          if (( ${#files[@]} )); then gh release upload "mac-ci-$SOURCE_SHA" --repo Benighter/VerseHalo-Releases "${files[@]}" --clobber; fi
