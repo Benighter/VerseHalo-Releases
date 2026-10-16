@@ -1,0 +1,18 @@
+name: VerseHalo Mac free build
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  runner-check:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 3
+    steps:
+      - name: Check the free standard Mac runner
+        run: |
+          sw_vers
+          uname -m
