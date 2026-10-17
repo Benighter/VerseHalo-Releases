@@ -3,7 +3,7 @@ const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),cryp
 const {execFileSync}=require('node:child_process');
 const {_electron:electron,expect}=require('@playwright/test'),asar=require('@electron/asar');
 const version=process.env.RELEASE_VERSION,previous=process.env.PREVIOUS_VERSION,arch=process.arch;
-if(process.platform!=='darwin'||!process.env.CI||![version,previous].every(v=>/^\d+\.\d+\.\d+-beta\.\d+$/.test(v||'')))throw Error('This verification requires a disposable native Mac CI runner and explicit beta versions.');
+if(process.platform!=='darwin'||!process.env.CI||![version,previous].every(v=>/^\d+\.\d+\.\d+(?:-beta\.\d+)?$/.test(v||'')))throw Error('This verification requires a disposable native Mac CI runner and explicit versions.');
 const run=(command,args)=>execFileSync(command,args,{encoding:'utf8',maxBuffer:8e6});
 const root=fs.mkdtempSync(path.join(process.env.RUNNER_TEMP,'versehalo-live-update-')),name='VerseHalo-Mac-'+version+'-'+arch+'.zip';
 let app;
