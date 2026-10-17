@@ -3,14 +3,14 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Published Mac beta to discover
+        description: Published Mac release to discover
         required: true
-        default: 6.1.11-beta.3
+        default: 6.1.11
         type: string
       previous_version:
         description: Older updater-enabled fixture version
         required: true
-        default: 6.1.11-beta.2
+        default: 6.1.11-beta.3
         type: string
 permissions:
   contents: write
